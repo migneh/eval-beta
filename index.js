@@ -1,6 +1,10 @@
-const { Client, GatewayIntentBits, Partials, Collection } = require("discord.js");
-const { ensureGuild } = require("./utils/database");
+const { Client, GatewayIntentBits } = require("discord.js");
+const config = require("./config");
 
+const pointsSystem = require("./systems/points/points");
+const helpCommand = require("./systems/help/helpCommand");
+const setupPanel = require("./systems/setup/setupPanel");
+const historyCommand = require("./systems/history/historyCommand");
 
 const client = new Client({
   intents: [
@@ -8,63 +12,101 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers
-  ],
-  partials: [Partials.Message, Partials.Channel]
+  ]
 });
 
-client.cooldowns = new Collection();
-const PREFIX = ";";
+const prefix = config.prefix || ";";
+
+/* =========================
+   Simple Cooldown System
+========================= */
+
+const cooldowns = new Map();
+const COOLDOWN_TIME = 3000; // 3 ثواني
+
+function checkCooldown(userId, command) {
+  const key = `${userId}-${command}`;
+  const now = Date.now();
+
+  if (cooldowns.has(key)) {
+    const expiration = cooldowns.get(key);
+    if (now < expiration) {
+      return Math.ceil((expiration - now) / 1000);
+    }
+  }
+
+  cooldowns.set(key, now + COOLDOWN_TIME);
+  return 0;
+}
+
+/* =========================
+   Ready
+========================= */
 
 client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
+/* =========================
+   Message Handler
+========================= */
+
 client.on("messageCreate", async (message) => {
+
   if (!message.guild) return;
   if (message.author.bot) return;
-  if (!message.content.startsWith(PREFIX)) return;
+  if (!message.content.startsWith(prefix)) return;
 
-  ensureGuild(message.guild.id);
-
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const args = message.content.slice(prefix.length).trim().split(/\s+/);
   const command = args.shift().toLowerCase();
 
-  // ⏳ Cooldown (3 ثواني افتراضي لكل أمر)
-  const cooldownAmount = 3000;
-  if (!client.cooldowns.has(command)) {
-    client.cooldowns.set(command, new Collection());
+  const remaining = checkCooldown(message.author.id, command);
+  if (remaining > 0) {
+    const msg = await message.channel.send(
+      `⏳ انتظر ${remaining} ثانية قبل استخدام الأمر مرة أخرى.`
+    );
+
+    setTimeout(() => {
+      msg.delete().catch(() => {});
+    }, 5000);
+
+    return;
   }
 
-  const now = Date.now();
-  const timestamps = client.cooldowns.get(command);
+  try {
 
-  if (timestamps.has(message.author.id)) {
-    const expiration = timestamps.get(message.author.id) + cooldownAmount;
-    if (now < expiration) return;
+    if (["add", "remove", "reset", "points", "top"].includes(command)) {
+      await pointsSystem(client, message, command, args);
+    }
+
+    else if (command === "help") {
+      await helpCommand(client, message, args);
+    }
+
+    else if (command === "setup" || command === "points-setup") {
+      await setupPanel(client, message, args);
+    }
+
+    else if (command === "history") {
+      await historyCommand(client, message, args);
+    }
+
+  } catch (error) {
+    console.error("COMMAND ERROR:", error);
+
+    const errorMsg = await message.channel.send(
+      "❌ حدث خطأ أثناء تنفيذ الأمر."
+    );
+
+    setTimeout(() => {
+      errorMsg.delete().catch(() => {});
+    }, 5000);
   }
 
-  timestamps.set(message.author.id, now);
-  setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
-
-  // 🔹 Help
-  if (command === "help") {
-    return require("./systems/help/helpCommand")(message);
-  }
-
-  // 🔹 Setup
-  if (command === "points-setup") {
-    return require("./systems/setup/setupPanel")(message);
-  }
-
-  // 🔹 Points System
-  if (["add", "remove", "reset", "points", "top"].includes(command)) {
-    return require("./systems/points/points")(client, message, command, args);
-  }
-
-  // 🔹 History
-  if (command === "history") {
-    return require("./systems/history/historyCommand")(message, args);
-  }
 });
+
+/* =========================
+   Login
+========================= */
 
 client.login("token");
