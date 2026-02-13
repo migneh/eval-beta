@@ -5,14 +5,20 @@ const COLORS = {
   error: 0xe74c3c,
   neutral: 0x3498db,
   panel: 0x2c3e50,
-  log: 0x9b59b6
+  log: 0x9b59b6,
+  warning: 0xf1c40f
 };
 
 function baseEmbed(guild, type = "neutral") {
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setColor(COLORS[type] || COLORS.neutral)
-    .setThumbnail(guild.iconURL({ dynamic: true }))
     .setTimestamp();
+
+  if (guild && guild.iconURL()) {
+    embed.setThumbnail(guild.iconURL({ dynamic: true }));
+  }
+
+  return embed;
 }
 
 function success(guild, description) {
@@ -45,12 +51,28 @@ function log(guild, description) {
     .setDescription(description);
 }
 
+function warning(guild, description) {
+  return baseEmbed(guild, "warning")
+    .setTitle("تنبيه")
+    .setDescription(description);
+}
+
+/* =========================
+   Aliases لحل مشكلة الكراش
+========================= */
+
+function normal(guild, description) {
+  return neutral(guild, null, description);
+}
+
 module.exports = {
   baseEmbed,
   success,
   error,
   neutral,
+  normal,     // حل مشكلة UI.normal
   panel,
   log,
+  warning,    // حل مشكلة UI.warning
   COLORS
 };
